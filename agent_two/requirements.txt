@@ -1,0 +1,22 @@
+# AgentTwo — Environment & Dependencies
+
+## Python
+3.10+   (tested syntax on 3.11–3.14)
+
+## Core runtime deps
+pip install mcp>=1.0.0               # FastMCP stdio server
+
+## Optional / Phase 2-4
+# comfyui-api-client or local ComfyUI bridge (for CUDA keyframes/stills)
+# runpodctl or runpod SDK (for cloud offload)
+# requests / httpx (for Higgsfield / Martini online tier, when available)
+
+## Environment variables
+export AGENT_ONE_BRAIN_DIR="/path/to/agenttwo_brain"   # separate from Agent One!
+# Falls back to ./agenttwo_brain/ if unset.
+
+## Launch
+python3 /home/gregjones/agent_two/mcp_server.py
+
+## Hermes registration (config snippet — see AGENT_TWO_MCP.md)
+# Paste into your Hermes MCP config or Claude Desktop / Cursor MCP JSON.
