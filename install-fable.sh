@@ -1,9 +1,12 @@
 #!/usr/bin/env bash
 # ═════════════════════════════════════════════════════════════════════════════
-# Project Fable — Installation Script
-# =====================================
+# Project Fable — Installation Script (FIXED v2)
+# ================================================
 # Run this on a fresh machine (Agent One, Agent Two, etc.) to replicate
 # the complete Fable Studio setup.
+#
+# The repo contains BOTH the dashboard AND backend files.
+# We clone once and copy to separate locations.
 #
 # Usage:
 #   curl -sL https://raw.githubusercontent.com/resppiano/local-ai-model-scraper/main/install-fable.sh | bash
@@ -27,6 +30,7 @@ DASHBOARD_PORT="${FABLE_DASHBOARD_PORT:-3001}"
 
 REPO_URL="https://github.com/resppiano/local-ai-model-scraper.git"
 BRANCH="main"
+CLONE_DIR="${FABLE_CLONE_DIR:-$HOME/fable-temp-clone}"
 
 # Higgsfield credentials (prompt if not set)
 HF_API_KEY="${HF_API_KEY:-}"
@@ -48,7 +52,7 @@ err() { echo -e "${RED}[ERR]${NC} $1"; }
 cmd_exists() { command -v "$1" >/dev/null 2>&1; }
 
 # ── System Check ───────────────────────────────────────────────────────────
-log "Starting Project Fable installation..."
+log "Starting Project Fable installation (v2)..."
 log "Install dir: $INSTALL_DIR"
 log "Dashboard dir: $DASHBOARD_DIR"
 log "Assets dir: $ASSETS_DIR"
@@ -93,34 +97,47 @@ else
     ok "Node.js $(node --version) is sufficient"
 fi
 
-# ── 3. Clone / Update Repositories ───────────────────────────────────────
-log "Setting up Fable repositories..."
+# ── 3. Clone Repository (single clone, copy to both locations) ────────────
+log "Cloning Fable repository..."
 
+# Remove temp clone if it exists from a failed previous run
+rm -rf "$CLONE_DIR"
+git clone --depth=1 --branch "$BRANCH" "$REPO_URL" "$CLONE_DIR"
+ok "Repo cloned to $CLONE_DIR"
+
+# ── 3a. Set up Dashboard directory ──────────────────────────────────────
+if [ -d "$DASHBOARD_DIR" ]; then
+    log "Dashboard directory exists — clearing..."
+    rm -rf "$DASHBOARD_DIR"
+fi
 mkdir -p "$HOME/Desktop"
+cp -r "$CLONE_DIR" "$DASHBOARD_DIR"
+# Dashboard doesn't need the agent_two backend
+rm -rf "$DASHBOARD_DIR/agent_two" 2>/dev/null || true
+# Remove .git from dashboard (it's a deploy location, not a dev repo)
+rm -rf "$DASHBOARD_DIR/.git"
+ok "Dashboard ready at $DASHBOARD_DIR"
 
-# Dashboard repo
-if [ -d "$DASHBOARD_DIR/.git" ]; then
-    log "Dashboard repo exists, pulling updates..."
-    cd "$DASHBOARD_DIR"
-    git fetch origin
-    git reset --hard "origin/$BRANCH"
-else
-    log "Cloning dashboard repository..."
-    git clone --depth=1 --branch "$BRANCH" "$REPO_URL" "$DASHBOARD_DIR"
+# ── 3b. Set up Agent Two / Fable API directory ──────────────────────────
+if [ -d "$INSTALL_DIR" ]; then
+    log "Agent directory exists — clearing..."
+    rm -rf "$INSTALL_DIR"
 fi
-ok "Dashboard repo ready at $DASHBOARD_DIR"
-
-# Agent Two / Fable API
 mkdir -p "$INSTALL_DIR"
-if [ -d "$INSTALL_DIR/.git" ]; then
-    log "Agent directory exists, pulling..."
-    cd "$INSTALL_DIR"
-    git pull origin "$BRANCH" 2>/dev/null || true
+
+# Copy ONLY agent_two contents into ~/agent_two
+if [ -d "$CLONE_DIR/agent_two" ]; then
+    cp -r "$CLONE_DIR/agent_two/"* "$INSTALL_DIR/"
+    ok "Backend copied to $INSTALL_DIR"
 else
-    log "Cloning Fable agent code..."
-    git clone --depth=1 --branch "$BRANCH" "$REPO_URL" "$INSTALL_DIR"
+    err "CRITICAL: agent_two/ directory NOT found in cloned repo!"
+    err "The repo may not have been updated with backend files."
+    exit 1
 fi
-ok "Agent code ready at $INSTALL_DIR"
+
+# Clean up temp clone
+rm -rf "$CLONE_DIR"
+ok "Temp clone cleaned up"
 
 # ── 4. Python Virtual Environment ────────────────────────────────────────
 log "Setting up Python virtual environment..."
@@ -144,8 +161,9 @@ pip install -q \
     sqlalchemy aiosqlite \
     python-multipart websockets \
     httpx \
+    mcp \
     2>/dev/null || pip install --break-system-packages -q \
-        fastapi uvicorn sqlalchemy aiosqlite python-multipart websockets httpx
+        fastapi uvicorn sqlalchemy aiosqlite python-multipart websockets httpx mcp
 
 ok "Python dependencies installed"
 
@@ -432,29 +450,53 @@ log "Running verification..."
 
 FAIL=0
 
-curl -s http://localhost:$API_PORT/health > /dev/null 2>&1 || {
-    warn "API not responding on port $API_PORT (expected if not started)"
+if [ ! -f "$INSTALL_DIR/fable_mcp_server.py" ]; then
+    err "CRITICAL: fable_mcp_server.py NOT found at $INSTALL_DIR/fable_mcp_server.py"
+    echo "   Listing agent_two directory contents:"
+    ls -la "$INSTALL_DIR/" 2>/dev/null || true
     FAIL=1
-}
+else
+    ok "fable_mcp_server.py found"
+fi
+
+if [ ! -f "$INSTALL_DIR/fable_agent.py" ]; then
+    err "CRITICAL: fable_agent.py NOT found"
+    FAIL=1
+else
+    ok "fable_agent.py found"
+fi
+
+if [ ! -f "$INSTALL_DIR/fable_api/main.py" ]; then
+    err "CRITICAL: fable_api/main.py NOT found"
+    FAIL=1
+else
+    ok "fable_api/main.py found"
+fi
+
+if [ ! -f "$INSTALL_DIR/brain.py" ]; then
+    warn "Filmake brain.py missing"
+else
+    ok "Filmake brain.py found"
+fi
+
+if [ ! -f "$INSTALL_DIR/comfyui_renderer.py" ]; then
+    warn "Filmake comfyui_renderer.py missing"
+else
+    ok "Filmake comfyui_renderer.py found"
+fi
 
 if [ ! -f "$DB_PATH" ]; then
     warn "Database not found at $DB_PATH"
     FAIL=1
+else
+    ok "Database found at $DB_PATH"
 fi
 
-if [ -f "$INSTALL_DIR/fable_api/main.py" ]; then
-    ok "API source found"
-else
-    err "API source missing"
-    FAIL=1
-fi
-
-if [ -f "$INSTALL_DIR/fable_mcp_server.py" ]; then
-    ok "MCP server found"
-else
-    err "MCP server missing"
-    FAIL=1
-fi
+# Try to start API briefly to test
+cd "$INSTALL_DIR"
+source venv/bin/activate
+python3 -c "import fable_api.main; print('API module loads OK')" 2>/dev/null && ok "API module loads" || warn "API module import test failed"
+python3 -c "import fable_mcp_server; print('MCP module loads OK')" 2>/dev/null && ok "MCP module loads" || warn "MCP module import test failed"
 
 # ── 14. Done ─────────────────────────────────────────────────────────────
 echo ""
@@ -498,5 +540,6 @@ echo "════════════════════════�
 if [ $FAIL -eq 0 ]; then
     ok "Installation complete!"
 else
-    warn "Installation completed with warnings. Check logs above."
+    warn "Installation completed with CRITICAL ERRORS. Check logs above."
+    exit 1
 fi

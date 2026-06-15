@@ -1,11 +1,12 @@
 #!/usr/bin/env bash
 # ═════════════════════════════════════════════════════════════════════════════
-# Project Fable — Agent One Quick Setup
-# =====================================
-# For Agent One (or any replica machine) that already has the repo cloned.
-# This is a faster, leaner version of install-fable.sh.
+# Project Fable — Agent One Quick Setup (FIXED v2)
+# =================================================
+# For Agent One (or any replica machine).
+# This clones the repo, extracts agent_two to ~/agent_two,
+# and copies the dashboard to ~/Desktop/app.
 #
-# Assumes: Ubuntu 24.04, git repo already cloned, Docker available
+# Assumes: Ubuntu 24.04, Docker available, git available
 # ═════════════════════════════════════════════════════════════════════════════
 
 set -euo pipefail
@@ -14,6 +15,10 @@ INSTALL_DIR="${FABLE_INSTALL_DIR:-$HOME/agent_two}"
 DASHBOARD_DIR="${FABLE_DASHBOARD_DIR:-$HOME/Desktop/app}"
 ASSETS_DIR="${FABLE_ASSETS_DIR:-$HOME/FableAssets}"
 API_PORT="${FABLE_API_PORT:-8001}"
+
+REPO_URL="https://github.com/resppiano/local-ai-model-scraper.git"
+BRANCH="main"
+CLONE_DIR="${FABLE_CLONE_DIR:-$HOME/fable-temp-clone}"
 
 HF_API_KEY="${HF_API_KEY:-}"
 HF_SECRET="${HF_SECRET:-}"
@@ -27,22 +32,39 @@ log() { echo -e "${BLUE}[Fable]${NC} $1"; }
 ok()  { echo -e "${GREEN}[OK]${NC}  $1"; }
 warn() { echo -e "${YELLOW}[WARN]${NC} $1"; }
 
-# ── 1. System Check ────────────────────────────────────────────────────────
-log "Agent One Quick Setup"
-log "Install dir: $INSTALL_DIR"
+# ── 1. Clone repo and extract ──────────────────────────────────────────
+log "Agent One Quick Setup (v2)"
 
-if [ ! -d "$INSTALL_DIR" ]; then
-    err "Install directory not found: $INSTALL_DIR"
-    err "Clone the repo first: git clone https://github.com/resppiano/local-ai-model-scraper.git $INSTALL_DIR"
-    exit 1
+if [ -d "$CLONE_DIR" ]; then
+    rm -rf "$CLONE_DIR"
 fi
 
-if [ ! -d "$DASHBOARD_DIR" ]; then
-    warn "Dashboard directory not found at $DASHBOARD_DIR"
-    warn "Creating symlink..."
-    mkdir -p "$HOME/Desktop"
-    ln -sf "$INSTALL_DIR/dashboard" "$DASHBOARD_DIR" 2>/dev/null || true
+log "Cloning repo..."
+git clone --depth=1 --branch "$BRANCH" "$REPO_URL" "$CLONE_DIR"
+ok "Repo cloned"
+
+# Extract agent_two to INSTALL_DIR
+if [ -d "$INSTALL_DIR" ]; then
+    log "Removing old $INSTALL_DIR..."
+    rm -rf "$INSTALL_DIR"
 fi
+mkdir -p "$INSTALL_DIR"
+cp -r "$CLONE_DIR/agent_two/"* "$INSTALL_DIR/"
+ok "Backend extracted to $INSTALL_DIR"
+
+# Extract dashboard to DASHBOARD_DIR
+if [ -d "$DASHBOARD_DIR" ]; then
+    log "Removing old $DASHBOARD_DIR..."
+    rm -rf "$DASHBOARD_DIR"
+fi
+mkdir -p "$HOME/Desktop"
+cp -r "$CLONE_DIR" "$DASHBOARD_DIR"
+rm -rf "$DASHBOARD_DIR/agent_two" 2>/dev/null || true
+rm -rf "$DASHBOARD_DIR/.git"
+ok "Dashboard extracted to $DASHBOARD_DIR"
+
+# Clean up
+rm -rf "$CLONE_DIR"
 
 # ── 2. Python Dependencies ─────────────────────────────────────────────────
 log "Setting up Python venv..."
@@ -53,7 +75,7 @@ if [ ! -d "venv" ]; then
 fi
 source venv/bin/activate
 pip install --upgrade pip -q
-pip install -q fastapi uvicorn sqlalchemy aiosqlite python-multipart websockets httpx
+pip install -q fastapi uvicorn sqlalchemy aiosqlite python-multipart websockets httpx mcp
 ok "Python deps installed"
 
 # ── 3. Higgsfield MCP ──────────────────────────────────────────────────────
@@ -168,7 +190,21 @@ chmod +x "$INSTALL_DIR/start_fable.sh"
 
 ok "Scripts ready"
 
-# ── 7. Systemd (optional) ────────────────────────────────────────────────
+# ── 7. Verify critical files ─────────────────────────────────────────────
+log "Verifying installation..."
+
+FAIL=0
+
+for f in fable_mcp_server.py fable_agent.py fable_api/main.py brain.py phases.py comfyui_renderer.py; do
+    if [ -f "$INSTALL_DIR/$f" ]; then
+        ok "$f found"
+    else
+        err "$f MISSING"
+        FAIL=1
+    fi
+done
+
+# ── 8. Systemd (optional) ────────────────────────────────────────────────
 if command -v systemctl >/dev/null; then
     log "Creating systemd services..."
     
@@ -205,7 +241,7 @@ EOF
     echo "Enable with: sudo systemctl enable --now fable-api fable-agent"
 fi
 
-# ── 8. Done ───────────────────────────────────────────────────────────────
+# ── 9. Done ───────────────────────────────────────────────────────────────
 echo ""
 echo "═══════════════════════════════════════════════════"
 echo "        🎬 AGENT ONE SETUP COMPLETE"
@@ -219,4 +255,10 @@ echo "  Dashboard:  http://localhost:3001"
 echo "  API:        http://localhost:$API_PORT"
 echo ""
 echo "═══════════════════════════════════════════════════"
-ok "Setup complete!"
+
+if [ $FAIL -eq 0 ]; then
+    ok "Setup complete!"
+else
+    warn "Setup completed with errors. Check logs above."
+    exit 1
+fi
