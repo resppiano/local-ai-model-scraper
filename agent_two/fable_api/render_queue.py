@@ -3,6 +3,7 @@ Fable API — Background Render Queue Worker
 ==========================================
 Polls the database for queued render jobs and dispatches them to:
   • ComfyUI (local, free)
+  • Infer (cloud, $49/mo flat — video, image, audio)
   • Higgsfield (cloud, paid)
 
 Run standalone:
@@ -21,6 +22,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from .database import async_session, Shot, RenderJob, Asset, Panel
 from .comfyui_client import ComfyUIClient
 from .higgsfield_client import HiggsfieldClient
+from .services.infer_client import InferClient, InferError
 
 
 ASSETS_DIR = os.environ.get("FABLE_ASSETS_DIR", "/home/gregjones/FableAssets")
@@ -35,6 +37,7 @@ class RenderQueue:
         self.task: Optional[asyncio.Task] = None
         self.comfyui = ComfyUIClient()
         self.higgsfield = HiggsfieldClient()
+        self.infer = None  # lazy init
         os.makedirs(ASSETS_DIR, exist_ok=True)
 
     async def start(self):
@@ -314,6 +317,160 @@ async def render_panel_comfyui(
                     await db.commit()
             except Exception:
                 pass
+
+
+# ── Infer render backend ──────────────────────────────────────────────────
+
+
+async def render_panel_infer(
+    panel_id: int,
+    project_id: int,
+    ltx_prompt: str,
+    image_url: Optional[str] = None,
+    model: str = "seedance-2.0-fast",
+    db_session=None,
+):
+    """
+    Standalone background task: render a panel using the Infer API.
+
+    Instead of local ComfyUI, this sends the prompt to Infer's cloud
+    API for video generation. Supports text-to-video and image-to-video.
+
+    Requires INFER_API_KEY in environment or .hermes/.env.
+    """
+    from .database import async_session
+    from .services.infer_client import InferClient, InferError
+    from sqlalchemy import select
+    from .database import Panel, Asset
+
+    try:
+        client = InferClient()
+    except InferError as e:
+        print(f"[render_panel_infer] No Infer API key: {e}")
+        async with async_session() as db:
+            panel = await db.scalar(select(Panel).where(Panel.id == panel_id))
+            if panel:
+                panel.status = "failed"
+                panel.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+        return
+
+    async with async_session() as db:
+        try:
+            # Submit to Infer
+            def _render():
+                if image_url:
+                    return client.image_to_video(
+                        image_url=image_url,
+                        prompt=ltx_prompt,
+                        model=model,
+                    )
+                else:
+                    return client.text_to_video(
+                        prompt=ltx_prompt,
+                        model=model,
+                    )
+
+            loop = asyncio.get_event_loop()
+            result = await loop.run_in_executor(None, _render)
+
+            # Extract output URL
+            output = result.get("output", {})
+            video_url = (output.get("video_url") or output.get("url")
+                         or output.get("output_url"))
+
+            if not video_url:
+                raise RuntimeError(f"Infer returned no video URL: {result}")
+
+            # Create asset
+            asset = Asset(
+                project_id=project_id,
+                type="video",
+                url=video_url,
+                local_path=None,
+                provider=f"infer:{model}",
+                meta=json.dumps(result),
+            )
+            db.add(asset)
+            await db.commit()
+            await db.refresh(asset)
+
+            # Update panel
+            panel = await db.scalar(select(Panel).where(Panel.id == panel_id))
+            if panel:
+                panel.status = "done"
+                panel.image_url = video_url
+                panel.updated_at = datetime.now(timezone.utc)
+                await db.commit()
+
+            print(f"[render_panel_infer] Panel {panel_id} completed via {model} → asset {asset.id}")
+
+        except Exception as e:
+            print(f"[render_panel_infer] Panel {panel_id} failed: {e}")
+            try:
+                panel = await db.scalar(select(Panel).where(Panel.id == panel_id))
+                if panel:
+                    panel.status = "failed"
+                    panel.updated_at = datetime.now(timezone.utc)
+                    await db.commit()
+            except Exception:
+                pass
+
+
+# ── Voice generation via Infer ────────────────────────────────────────────
+
+
+async def generate_voice_infer(
+    project_id: int,
+    text: str,
+    voice: str = "default",
+    model: str = "eleven-v3",
+) -> Optional[str]:
+    """
+    Generate voice audio via Infer's text-to-speech.
+
+    Returns the audio URL on success, None on failure.
+    """
+    from .services.infer_client import InferClient, InferError
+    from .database import async_session
+    from .database import Asset
+
+    try:
+        client = InferClient()
+    except InferError:
+        return None
+
+    def _generate():
+        return client.text_to_speech(text=text, model=model, voice=voice)
+
+    try:
+        loop = asyncio.get_event_loop()
+        result = await loop.run_in_executor(None, _generate)
+        output = result.get("output", {})
+        audio_url = (output.get("audio_url") or output.get("url")
+                     or output.get("output_url"))
+        if not audio_url:
+            return None
+
+        # Store as asset
+        async with async_session() as db:
+            asset = Asset(
+                project_id=project_id,
+                type="audio",
+                url=audio_url,
+                local_path=None,
+                provider=f"infer:{model}",
+                meta=json.dumps(result),
+            )
+            db.add(asset)
+            await db.commit()
+            await db.refresh(asset)
+            print(f"[generate_voice_infer] Voice created → asset {asset.id}")
+            return audio_url
+
+    except Exception as e:
+        print(f"[generate_voice_infer] Failed: {e}")
+        return None
 
 
 if __name__ == "__main__":

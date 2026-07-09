@@ -11,8 +11,13 @@ system, and generates LTX video prompts for the ComfyUI rendering pipeline.
 ```
 Script → Scene Breakdown → Characters → Assets → Storyboard
     → Panel Generation → LTX Prompt (Multi-Agent RAG-Enhanced)
-    → ComfyUI / LTX Video → Final Output
+    → Infer Cloud API or ComfyUI (local) → Final Output
 ```
+
+**Render backends:**
+- **ComfyUI** (local) — free, runs on your RTX 3060 via LTX workflow
+- **Infer** (cloud, $49/mo) — unified API for 60+ models: Seedance 2.0,
+  Kling 3 Pro, LTX 2.3, Flux 2, GPT Image 2, Elevenlabs voice, and more
 
 ---
 
@@ -381,6 +386,105 @@ description: Brief description
 tags: [category, subtopic]
 timestamp: 2026-07-08
 ---
+```
+
+## Infer Integration
+
+### Setup
+
+Set your Infer API key:
+```bash
+export INFER_API_KEY="<your-key>"
+# Or add to ~/.hermes/.env
+```
+
+### Available Models
+
+**Video generation:**
+| Model | Provider | Tasks |
+|-------|----------|-------|
+| `seedance-2.0-fast` | ByteDance | text-to-video, image-to-video |
+| `ltx-2.3` | Lightricks | text-to-video, image-to-video |
+| `kling-3-pro` | Kuaishou | text-to-video, image-to-video |
+| `happyhorse-1.0` | Alibaba | text-to-video, image-to-video |
+
+**Image generation:**
+| Model | Provider | Tasks |
+|-------|----------|-------|
+| `flux-2` | Black Forest Labs | text-to-image, image-to-image |
+| `gpt-image-2` | OpenAI | text-to-image, image-to-image |
+| `ideogram-4` | Ideogram | text-to-image, image-to-image |
+
+**Voice/audio:**
+| Model | Provider | Tasks |
+|-------|----------|-------|
+| `eleven-v3` | Eleven Labs | text-to-speech |
+
+### Usage
+
+Render a panel via Infer (background task):
+```python
+from fable_api.render_queue import render_panel_infer
+
+await render_panel_infer(
+    panel_id=3,
+    project_id=1,
+    ltx_prompt="[VISUAL]...[CINEMATOGRAPHY]...",
+    model="seedance-2.0-fast",  # or "ltx-2.3", "kling-3-pro"
+)
+```
+
+Generate voice for a character:
+```python
+from fable_api.render_queue import generate_voice_infer
+
+url = await generate_voice_infer(
+    project_id=1,
+    text="I will find you, no matter where you hide.",
+    voice="default",  # eleven-v3 voice ID
+    model="eleven-v3",
+)
+```
+
+Via curl:
+```bash
+# Submit a text-to-video job
+curl -X POST "https://api.tryinfer.com/v1/inference/seedance-2.0-fast/text-to-video" \
+  -H "Authorization: Bearer $INFER_API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"input":{"prompt":"A cinematic scene...","duration_seconds":"5","aspect_ratio":"16:9"}}'
+
+# Poll for completion
+curl -s "https://api.tryinfer.com/v1/inference/requests/$REQUEST_ID" \
+  -H "Authorization: Bearer $INFER_API_KEY"
+```
+
+### Python Client
+
+```python
+from fable_api.services.infer_client import InferClient
+
+client = InferClient(api_key="sk-...")
+
+# Video
+result = client.text_to_video(
+    prompt="A detective stares at a wall of evidence...",
+    model="seedance-2.0-fast",
+    duration_seconds="5",
+)
+
+# Image
+result = client.text_to_image(
+    prompt="A character portrait, cinematic lighting",
+    model="flux-2",
+    n=4,
+)
+
+# Voice
+result = client.text_to_speech(
+    text="Hello, I've been expecting you.",
+    model="eleven-v3",
+)
 ```
 
 ## Troubleshooting
