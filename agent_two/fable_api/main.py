@@ -19,19 +19,26 @@ from typing import Optional
 
 from fastapi import FastAPI, Depends, HTTPException, BackgroundTasks, Query
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
+from fastapi.responses import FileResponse
 from sqlalchemy import select, func, desc
 from sqlalchemy.orm import selectinload
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from .database import init_db, get_db, Project, Shot, Character, Asset, RenderJob
+from .database import init_db, get_db, Project, Shot, Character, Asset, RenderJob, Script, Scene, Panel
 from .schemas import (
     ProjectCreate, ProjectUpdate, ProjectOut,
     ShotCreate, ShotUpdate, ShotOut,
     CharacterCreate, CharacterUpdate, CharacterOut,
     AssetCreate, AssetOut,
     RenderRequest, RenderStatus, DashboardStats,
+    ControlVideoOut,
 )
 from .render_queue import RenderQueue
+from .routes.scripts import router as scripts_router
+from .routes.scenes import router as scenes_router
+from .routes.panels import router as panels_router
+from .routes.upload import router as upload_router
 
 
 # ── Lifespan ──────────────────────────────────────────────────────────────
@@ -59,6 +66,106 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# Register routers
+app.include_router(scripts_router)
+app.include_router(scenes_router)
+app.include_router(panels_router)
+app.include_router(upload_router)
+
+# ── Static files ───────────────────────────────────────────────────────────
+STATIC_DIR = os.path.join(os.path.dirname(__file__), "static")
+os.makedirs(STATIC_DIR, exist_ok=True)
+os.makedirs(os.path.expanduser("~/FableAssets/uploads"), exist_ok=True)
+
+# Serve uploaded assets
+app.mount("/uploads", StaticFiles(directory=os.path.expanduser("~/FableAssets/uploads")), name="uploads")
+# Serve internal static (TheoreticallyPose HTML etc.)
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+# ── TheoreticallyPose V4 ───────────────────────────────────────────────────
+@app.get("/theoreticallypose/v4")
+async def theoreticallypose_v4(
+    project_id: Optional[int] = Query(None, alias="projectId"),
+    panel_id: Optional[int] = Query(None, alias="panelId"),
+):
+    """Serve the TheoreticallyPose V4 tool. If projectId is provided,
+    the tool shows a 'Save to Fable' button that POSTs exports to the API."""
+    return FileResponse(
+        os.path.join(STATIC_DIR, "theoreticallypose_v4.html"),
+        media_type="text/html",
+    )
+
+# ── Control Videos ─────────────────────────────────────────────────────────
+@app.get("/projects/{project_id}/control-videos", response_model=list[ControlVideoOut])
+async def list_control_videos(
+    project_id: int,
+    panel_id: Optional[int] = Query(None),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all control video assets for a project, optionally filtered by panel."""
+    proj = await db.scalar(select(Project).where(Project.id == project_id))
+    if not proj:
+        raise HTTPException(404, "Project not found")
+
+    stmt = (
+        select(Asset)
+        .where(Asset.project_id == project_id)
+        .where(Asset.tags.like('%control_video%'))
+        .order_by(desc(Asset.created_at))
+    )
+    if panel_id is not None:
+        stmt = stmt.where(Asset.panel_id == panel_id)
+
+    result = await db.execute(stmt)
+    assets = result.scalars().all()
+
+    out = []
+    for a in assets:
+        panel = None
+        if a.panel_id:
+            p = await db.scalar(select(Panel).where(Panel.id == a.panel_id))
+            if p:
+                from .schemas import PanelOut
+                panel = PanelOut.model_validate(p)
+        out.append(ControlVideoOut(asset=AssetOut.model_validate(a), panel=panel))
+    return out
+
+
+# ── Panel Driving Video ────────────────────────────────────────────────────
+@app.post("/panels/{panel_id}/driving-video", status_code=200)
+async def set_panel_driving_video(
+    panel_id: int,
+    asset_id: int = Form(...),
+    db: AsyncSession = Depends(get_db),
+):
+    """Link an existing control video asset as a panel's driving video."""
+    panel = await db.scalar(select(Panel).where(Panel.id == panel_id))
+    if not panel:
+        raise HTTPException(404, "Panel not found")
+    asset = await db.scalar(select(Asset).where(Asset.id == asset_id))
+    if not asset:
+        raise HTTPException(404, "Asset not found")
+
+    panel.driving_video_asset_id = asset_id
+    panel.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok", "panel_id": panel_id, "driving_video_asset_id": asset_id}
+
+
+@app.delete("/panels/{panel_id}/driving-video", status_code=200)
+async def remove_panel_driving_video(
+    panel_id: int,
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove the driving video link from a panel."""
+    panel = await db.scalar(select(Panel).where(Panel.id == panel_id))
+    if not panel:
+        raise HTTPException(404, "Panel not found")
+    panel.driving_video_asset_id = None
+    panel.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    return {"status": "ok", "panel_id": panel_id, "driving_video_asset_id": None}
 
 
 # ═══════════════════════════════════════════════════════════════════════
@@ -390,6 +497,8 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         select(func.count()).select_from(Shot).where(Shot.status == "done")
     )
     total_assets = await db.scalar(select(func.count()).select_from(Asset))
+    total_scripts = await db.scalar(select(func.count()).select_from(Script))
+    total_scenes = await db.scalar(select(func.count()).select_from(Scene))
 
     # Recent 10 assets
     stmt = select(Asset).order_by(desc(Asset.created_at)).limit(10)
@@ -402,6 +511,8 @@ async def dashboard_stats(db: AsyncSession = Depends(get_db)):
         total_shots=total_shots or 0,
         shots_rendered=shots_rendered or 0,
         total_assets=total_assets or 0,
+        total_scripts=total_scripts or 0,
+        total_scenes=total_scenes or 0,
         recent_assets=recent_assets,
     )
 

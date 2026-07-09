@@ -116,6 +116,7 @@ class CharacterUpdate(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
     reference_image_url: Optional[str] = None
+    gallery_images: Optional[str] = None
     higgsfield_character_id: Optional[str] = None
     comfyui_embedding_path: Optional[str] = None
 
@@ -126,6 +127,7 @@ class CharacterOut(BaseModel):
     name: str
     description: Optional[str]
     reference_image_url: Optional[str]
+    gallery_images: Optional[str]
     higgsfield_character_id: Optional[str]
     comfyui_embedding_path: Optional[str]
     created_at: datetime
@@ -140,6 +142,8 @@ class AssetCreate(BaseModel):
     url: str
     local_path: Optional[str] = None
     provider: Optional[str] = None
+    source: str = "generated"
+    tags: Optional[str] = None
     width: Optional[int] = None
     height: Optional[int] = None
     duration: Optional[float] = None
@@ -150,10 +154,13 @@ class AssetOut(BaseModel):
     id: int
     project_id: int
     shot_id: Optional[int]
+    panel_id: Optional[int]
     type: str
     url: str
     local_path: Optional[str]
     provider: Optional[str]
+    source: str
+    tags: Optional[str]
     width: Optional[int]
     height: Optional[int]
     duration: Optional[float]
@@ -202,9 +209,140 @@ class DashboardStats(BaseModel):
     total_shots: int
     shots_rendered: int
     total_assets: int
+    total_scripts: int = 0
+    total_scenes: int = 0
     recent_assets: List[AssetOut] = []
 
 
-# Resolve forward refs
+# ── Script ────────────────────────────────────────────────────────────────
+class ScriptCreate(BaseModel):
+    title: str = Field(..., min_length=1, max_length=255)
+    content: str
+
+
+class ScriptUpdate(BaseModel):
+    title: Optional[str] = Field(None, max_length=255)
+    content: Optional[str] = None
+
+
+class ScriptOut(BaseModel):
+    id: int
+    project_id: int
+    title: str
+    content: str
+    created_at: datetime
+    scenes: List["SceneOut"] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ── Scene ─────────────────────────────────────────────────────────────────
+class SceneCreate(BaseModel):
+    scene_number: int
+    heading: str
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class SceneUpdate(BaseModel):
+    scene_number: Optional[int] = None
+    heading: Optional[str] = None
+    location: Optional[str] = None
+    time_of_day: Optional[str] = None
+    summary: Optional[str] = None
+
+
+class SceneOut(BaseModel):
+    id: int
+    script_id: int
+    scene_number: int
+    heading: str
+    location: Optional[str]
+    time_of_day: Optional[str]
+    summary: Optional[str]
+    created_at: datetime
+    panels: List["PanelOut"] = []
+
+    class Config:
+        from_attributes = True
+
+
+# ── Panel ─────────────────────────────────────────────────────────────────
+class PanelCreate(BaseModel):
+    panel_number: int
+    panel_type: str = Field("wide", pattern=r"^(wide|medium|closeup|insert)$")
+    description: str
+    camera_direction: str = Field("static", pattern=r"^(pan_left|pan_right|dolly_in|dolly_out|static)$")
+    assigned_character_ids: Optional[str] = None
+    assigned_asset_ids: Optional[str] = None
+    driving_video_asset_id: Optional[int] = None
+
+
+class PanelUpdate(BaseModel):
+    panel_number: Optional[int] = None
+    panel_type: Optional[str] = None
+    description: Optional[str] = None
+    auto_prompt: Optional[str] = None
+    override_prompt: Optional[str] = None
+    camera_direction: Optional[str] = None
+    status: Optional[str] = None
+    render_provider: Optional[str] = None
+    render_model: Optional[str] = None
+    thumbnail_url: Optional[str] = None
+    output_path: Optional[str] = None
+    assigned_character_ids: Optional[str] = None
+    assigned_asset_ids: Optional[str] = None
+
+
+class PanelOut(BaseModel):
+    id: int
+    scene_id: int
+    panel_number: int
+    panel_type: str
+    description: str
+    auto_prompt: Optional[str]
+    override_prompt: Optional[str]
+    camera_direction: str
+    status: str
+    render_provider: Optional[str]
+    render_model: Optional[str]
+    thumbnail_url: Optional[str]
+    output_path: Optional[str]
+    assigned_character_ids: Optional[str]
+    assigned_asset_ids: Optional[str]
+    driving_video_asset_id: Optional[int]
+    created_at: datetime
+    updated_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+# ── Upload ────────────────────────────────────────────────────────────────
+class UploadResponse(BaseModel):
+    asset: AssetOut
+    filename: str
+    file_type: str
+    tags: List[str] = []
+    panel_id: Optional[int] = None
+
+
+# ── Control Video ─────────────────────────────────────────────────────────
+class ControlVideoOut(BaseModel):
+    asset: AssetOut
+    panel: Optional["PanelOut"] = None
+
+
+# ── Breakdown ────────────────────────────────────────────────────────────
+class BreakdownResult(BaseModel):
+    scenes_parsed: int
+    scenes: List[SceneOut]
+
+
+# ── Resolve forward refs ─────────────────────────────────────────────────
 ShotOut.model_rebuild()
 ProjectOut.model_rebuild()
+ScriptOut.model_rebuild()
+SceneOut.model_rebuild()

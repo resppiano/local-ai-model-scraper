@@ -50,6 +50,7 @@ class Project(Base):
     shots: Mapped[list["Shot"]] = relationship("Shot", back_populates="project", cascade="all, delete-orphan")
     characters: Mapped[list["Character"]] = relationship("Character", back_populates="project", cascade="all, delete-orphan")
     assets: Mapped[list["Asset"]] = relationship("Asset", back_populates="project", cascade="all, delete-orphan")
+    scripts: Mapped[list["Script"]] = relationship("Script", back_populates="project", cascade="all, delete-orphan")
 
 
 class Shot(Base):
@@ -91,6 +92,7 @@ class Character(Base):
     name: Mapped[str] = mapped_column(String(255), nullable=False)
     description: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     reference_image_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    gallery_images: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of URLs/paths
     higgsfield_character_id: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)  # cloud char ID
     comfyui_embedding_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)  # local embedding
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
@@ -105,10 +107,13 @@ class Asset(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
     shot_id: Mapped[Optional[int]] = mapped_column(ForeignKey("shots.id"), nullable=True)
+    panel_id: Mapped[Optional[int]] = mapped_column(ForeignKey("panels.id"), nullable=True)
     type: Mapped[str] = mapped_column(String(50), nullable=False)  # image | video | audio | thumbnail
     url: Mapped[str] = mapped_column(String(500), nullable=False)
     local_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
     provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)  # comfyui | higgsfield | upload
+    source: Mapped[str] = mapped_column(String(50), default="generated")  # generated | uploaded
+    tags: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array
     width: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     height: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)
     duration: Mapped[Optional[float]] = mapped_column(Float, nullable=True)
@@ -118,6 +123,7 @@ class Asset(Base):
 
     project: Mapped["Project"] = relationship("Project", back_populates="assets")
     shot: Mapped[Optional["Shot"]] = relationship("Shot", back_populates="assets")
+    panel: Mapped[Optional["Panel"]] = relationship("Panel")
 
 
 class RenderJob(Base):
@@ -132,6 +138,65 @@ class RenderJob(Base):
     completed_at: Mapped[Optional[datetime]] = mapped_column(DateTime, nullable=True)
     error_message: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
     created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+
+# ── New Models: Script, Scene, Panel ─────────────────────────────────────
+class Script(Base):
+    __tablename__ = "scripts"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    project_id: Mapped[int] = mapped_column(ForeignKey("projects.id"), nullable=False)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    content: Mapped[str] = mapped_column(Text, nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    project: Mapped["Project"] = relationship("Project", back_populates="scripts")
+    scenes: Mapped[list["Scene"]] = relationship("Scene", back_populates="script", cascade="all, delete-orphan")
+
+
+class Scene(Base):
+    __tablename__ = "scenes"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    script_id: Mapped[int] = mapped_column(ForeignKey("scripts.id"), nullable=False)
+    scene_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    heading: Mapped[str] = mapped_column(String(500), nullable=False)
+    location: Mapped[Optional[str]] = mapped_column(String(255), nullable=True)
+    time_of_day: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    summary: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+
+    script: Mapped["Script"] = relationship("Script", back_populates="scenes")
+    panels: Mapped[list["Panel"]] = relationship("Panel", back_populates="scene", cascade="all, delete-orphan")
+
+
+class Panel(Base):
+    __tablename__ = "panels"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    scene_id: Mapped[int] = mapped_column(ForeignKey("scenes.id"), nullable=False)
+    panel_number: Mapped[int] = mapped_column(Integer, nullable=False)
+    panel_type: Mapped[str] = mapped_column(String(50), default="wide")  # wide/medium/closeup/insert
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    auto_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    override_prompt: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    camera_direction: Mapped[str] = mapped_column(String(50), default="static")  # pan_left/pan_right/dolly_in/dolly_out/static
+    status: Mapped[str] = mapped_column(String(50), default="draft")  # draft|queued|rendering|done|failed
+    render_provider: Mapped[Optional[str]] = mapped_column(String(50), nullable=True)
+    render_model: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
+    thumbnail_url: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    output_path: Mapped[Optional[str]] = mapped_column(String(500), nullable=True)
+    assigned_character_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of ints
+    assigned_asset_ids: Mapped[Optional[str]] = mapped_column(Text, nullable=True)  # JSON array of ints
+    driving_video_asset_id: Mapped[Optional[int]] = mapped_column(Integer, nullable=True)  # FK to assets._id
+    created_at: Mapped[datetime] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime,
+        default=lambda: datetime.now(timezone.utc),
+        onupdate=lambda: datetime.now(timezone.utc),
+    )
+
+    scene: Mapped["Scene"] = relationship("Scene", back_populates="panels")
 
 
 # ── Engine & Session ────────────────────────────────────────────────────
