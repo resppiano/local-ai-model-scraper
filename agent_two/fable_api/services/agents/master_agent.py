@@ -54,6 +54,9 @@ def synthesize(
     cinema_block: str,
     storytelling_block: str,
     author_block: str,
+    master_model: str = "openai/gpt-4o",
+    scene_position: str = "",
+    continuity: Optional[str] = None,
 ) -> str:
     """
     Synthesize all three expert blocks plus panel data into the final LTX prompt.
@@ -79,6 +82,10 @@ def synthesize(
         lines.append(f"Project vision: {project_vision}")
     if project_tone:
         lines.append(f"Project tone: {project_tone}")
+    if scene_position:
+        lines.append(f"Scene position: {scene_position}")
+    if continuity:
+        lines.append(f"Previous panel prompt for continuity: {continuity[:1000]}")
     lines.append(f"Mode: {mode}")
 
     if characters:
@@ -105,7 +112,7 @@ def synthesize(
 
     user_prompt = "\n".join(lines)
 
-    result = call_llm(SYSTEM_PROMPT, user_prompt, temperature=0.3, max_tokens=2048)
+    result = call_llm(SYSTEM_PROMPT, user_prompt, model=master_model, temperature=0.3, max_tokens=2048)
     if result:
         return result
 

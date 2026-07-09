@@ -37,6 +37,7 @@ def analyze_author_style(
     project_vision: Optional[str] = None,
     project_tone: Optional[str] = None,
     scene_summary: Optional[str] = None,
+    sub_agent_model: str = "openai/gpt-4o-mini",
 ) -> str:
     """Returns a structured [AUTHOR STYLE] block. Falls back on failure."""
     lines = [f"Panel description: {description}"]
@@ -75,7 +76,7 @@ def analyze_author_style(
         lines.append("")
 
     user_prompt = "\n".join(lines)
-    result = call_llm(SYSTEM_PROMPT, user_prompt, temperature=0.4)
+    result = call_llm(SYSTEM_PROMPT, user_prompt, model=sub_agent_model, temperature=0.4)
     if result:
         return result
 

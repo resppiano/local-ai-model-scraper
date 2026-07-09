@@ -272,10 +272,15 @@ class KnowledgeRAG:
         # Sort by score descending
         scored.sort(key=lambda x: x[0], reverse=True)
 
-        # Build results
+        # Build results with deduplication
         results = []
-        for score, idx in scored[:top_k]:
+        seen = set()
+        for score, idx in scored[:top_k * 2]:  # pull extra to still fill top_k after dedup
             chunk = self.chunks[idx]
+            dedup_key = f"{chunk['source']}|{chunk['heading']}"
+            if dedup_key in seen:
+                continue
+            seen.add(dedup_key)
             results.append({
                 "domain": chunk["domain"],
                 "source": chunk["source"],
@@ -284,6 +289,8 @@ class KnowledgeRAG:
                 "tags": chunk.get("tags", []),
                 "score": round(score, 4),
             })
+            if len(results) >= top_k:
+                break
 
         return results
 

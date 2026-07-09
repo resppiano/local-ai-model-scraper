@@ -41,6 +41,9 @@ def analyze_cinematography(
     scene_summary: Optional[str] = None,
     project_tone: Optional[str] = None,
     project_vision: Optional[str] = None,
+    sub_agent_model: str = "openai/gpt-4o-mini",
+    scene_position: str = "",
+    continuity: Optional[str] = None,
 ) -> str:
     """
     Returns a structured [CINEMATOGRAPHY] block string.
@@ -57,6 +60,10 @@ def analyze_cinematography(
         lines.append(f"Project tone: {project_tone}")
     if project_vision:
         lines.append(f"Project vision: {project_vision}")
+    if scene_position:
+        lines.append(f"Scene position: {scene_position}")
+    if continuity:
+        lines.append(f"Previous panel context: {continuity[:500]}")
 
     # RAG context
     rag = get_rag()
@@ -75,7 +82,7 @@ def analyze_cinematography(
     user_prompt = "\n".join(lines)
 
     # Try LLM
-    result = call_llm(SYSTEM_PROMPT, user_prompt, temperature=0.4)
+    result = call_llm(SYSTEM_PROMPT, user_prompt, model=sub_agent_model, temperature=0.4)
     if result:
         return result
 

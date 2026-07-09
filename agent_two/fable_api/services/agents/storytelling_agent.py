@@ -41,6 +41,9 @@ def analyze_storytelling(
     project_tone: Optional[str] = None,
     project_vision: Optional[str] = None,
     characters: Optional[List[Dict[str, Any]]] = None,
+    sub_agent_model: str = "openai/gpt-4o-mini",
+    scene_position: str = "",
+    continuity: Optional[str] = None,
 ) -> str:
     """Returns a structured [STORYTELLING] block string. Falls back on failure."""
     lines = [f"Panel description: {description}"]
@@ -52,6 +55,10 @@ def analyze_storytelling(
         lines.append(f"Project tone: {project_tone}")
     if project_vision:
         lines.append(f"Project vision: {project_vision}")
+    if scene_position:
+        lines.append(f"Scene position: {scene_position}")
+    if continuity:
+        lines.append(f"Previous panel context: {continuity[:500]}")
     if characters:
         char_strs = [f"{c.get('name','?')}: {c.get('description','')}" for c in characters]
         lines.append("Characters:")
@@ -86,22 +93,22 @@ def analyze_storytelling(
         lines.append("")
 
     user_prompt = "\n".join(lines)
-    result = call_llm(SYSTEM_PROMPT, user_prompt, temperature=0.4)
+    result = call_llm(SYSTEM_PROMPT, user_prompt, model=sub_agent_model, temperature=0.4)
     if result:
         return result
 
     # Fallback
-        fallback_lines = []
-        nf = ['Scene builds tension and advances the plot', 'Scene provides emotional resolution', 'Scene establishes the world and character dynamics', 'Scene represents a turning point in the narrative', 'Scene deepens character relationships and reveals motivation']
-        tones = ['grounded and real', 'heightened and dramatic', 'warm and intimate', 'tense and foreboding', 'bittersweet and reflective']
-        techs = ['Classic three-act structure, rising action', 'Character-driven narrative, internal conflict', 'Genre conventions inform the visual language', 'Pacing builds toward a reveal', 'Atmospheric, mood-driven storytelling']
-        chars = ['The protagonist is at the center of the frame', 'Character relationships shape the blocking and space between them', 'Internal conflict is reflected in the visual composition', 'Power dynamics are communicated through framing and height']
-        pacings = ['Slow, deliberate -- the camera holds and breathes', 'Medium pace -- natural, scene-driven rhythm', 'Building tension -- each shot tightens toward the climax', 'Fast and urgent -- dynamic energy drives the scene', 'Calm and reflective -- the aftermath, space to breathe']
+    fallback_lines = []
+    nf = ['Scene builds tension and advances the plot', 'Scene provides emotional resolution', 'Scene establishes the world and character dynamics', 'Scene represents a turning point in the narrative', 'Scene deepens character relationships and reveals motivation']
+    tones = ['grounded and real', 'heightened and dramatic', 'warm and intimate', 'tense and foreboding', 'bittersweet and reflective']
+    techs = ['Classic three-act structure, rising action', 'Character-driven narrative, internal conflict', 'Genre conventions inform the visual language', 'Pacing builds toward a reveal', 'Atmospheric, mood-driven storytelling']
+    char_dynamics = ['The protagonist is at the center of the frame', 'Character relationships shape the blocking and space between them', 'Internal conflict is reflected in the visual composition', 'Power dynamics are communicated through framing and height']
+    pacings = ['Slow, deliberate -- the camera holds and breathes', 'Medium pace -- natural, scene-driven rhythm', 'Building tension -- each shot tightens toward the climax', 'Fast and urgent -- dynamic energy drives the scene', 'Calm and reflective -- the aftermath, space to breathe']
 
-        fallback_lines.append(f"[STORYTELLING]")
-        fallback_lines.append(f"Narrative Function: {nf[hash(description or '') % 5]}.")
-        fallback_lines.append(f"Tone: {project_tone or 'Neutral, observational'} -- the scene should feel {tones[hash(project_tone or 'neutral') % 5]}.")
-        fallback_lines.append(f"Technique: {techs[hash(description or '') % 5]}.")
-        fallback_lines.append(f"Character Dynamic: {chars[hash(str(characters or '')) % 4]}.")
-        fallback_lines.append(f"Pacing: {pacings[hash(project_tone or 'neutral') % 5]}.")
-        return "\n".join(fallback_lines)
+    fallback_lines.append("[STORYTELLING]")
+    fallback_lines.append(f"Narrative Function: {nf[hash(description or '') % 5]}.")
+    fallback_lines.append(f"Tone: {project_tone or 'Neutral, observational'} -- the scene should feel {tones[hash(project_tone or 'neutral') % 5]}.")
+    fallback_lines.append(f"Technique: {techs[hash(description or '') % 5]}.")
+    fallback_lines.append(f"Character Dynamic: {char_dynamics[hash(str(characters or '')) % 4]}.")
+    fallback_lines.append(f"Pacing: {pacings[hash(project_tone or 'neutral') % 5]}.")
+    return "\n".join(fallback_lines)

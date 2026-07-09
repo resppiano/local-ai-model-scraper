@@ -31,11 +31,22 @@ def _get_agent() -> LTXPromptAgent:
 
 def _camera_to_natural_language(direction: str) -> str:
     mapping = {
-        "pan_left": "camera slowly pans left",
-        "pan_right": "camera slowly pans right",
-        "dolly_in": "camera slowly pushes in",
-        "dolly_out": "camera slowly pulls back",
-        "static": "static shot, camera is still",
+        "pan_left": "camera slowly pans left, revealing the scene horizontally",
+        "pan_right": "camera slowly pans right, following the action",
+        "dolly_in": "camera smoothly pushes in toward the subject, intensifying the moment",
+        "dolly_out": "camera smoothly pulls back, revealing the larger context",
+        "track_left": "camera tracks left alongside the subject, following their movement",
+        "track_right": "camera tracks right alongside the subject, maintaining distance",
+        "crane_up": "camera rises up, revealing the full scale of the environment",
+        "crane_down": "camera lowers, bringing us into the scene from above",
+        "tilt_up": "camera tilts up, revealing height and scale",
+        "tilt_down": "camera tilts down, looking down on the subject",
+        "static": "static shot, camera is perfectly still, locked off on tripod",
+        "handheld": "handheld camera, slight natural shake, documentary feel",
+        "steadicam": "smooth gimbal-mounted shot, following the subject fluidly",
+        "dolly_zoom": "dolly zoom effect — camera pulls back while zooming in, background warps",
+        "whip_pan": "fast whip pan, quick disorienting camera movement",
+        "aerial": "aerial drone shot, high above, sweeping view",
     }
     return mapping.get(direction, "static shot, camera is still")
 
@@ -54,6 +65,9 @@ def generate_panel_ltx_prompt(
     project_vision: Optional[str] = None,
     project_tone: Optional[str] = None,
     mode: str = "image-to-video",
+    panel_number: Optional[int] = None,
+    total_panels: Optional[int] = None,
+    previous_panel_prompt: Optional[str] = None,
 ) -> str:
     """
     Generate a structured LTX 2.3 prompt using the Super Prompt Agent LLM.
@@ -87,6 +101,9 @@ def generate_panel_ltx_prompt(
         project_vision=project_vision,
         project_tone=project_tone,
         mode=mode,
+        panel_number=panel_number,
+        total_panels=total_panels,
+        previous_panel_prompt=previous_panel_prompt,
     )
 
 
@@ -163,6 +180,9 @@ async def generate_ltx_prompt_from_panel_db(
     project_tone: Optional[str] = None,
     character_lookup_func=None,
     mode: str = "image-to-video",
+    panel_number: Optional[int] = None,
+    total_panels: Optional[int] = None,
+    previous_panel_prompt: Optional[str] = None,
 ) -> str:
     """
     Convenience wrapper for DB-driven calls.
@@ -197,6 +217,9 @@ async def generate_ltx_prompt_from_panel_db(
             project_vision=project_vision,
             project_tone=project_tone,
             mode=mode,
+            panel_number=panel_number,
+            total_panels=total_panels,
+            previous_panel_prompt=previous_panel_prompt,
         )
     except Exception as e:
         print(f"[prompt_builder] LLM path failed: {e}, using fallback")
